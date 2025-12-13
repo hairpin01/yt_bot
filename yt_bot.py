@@ -2592,13 +2592,12 @@ async def clear_cache_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(traceback.format_exc())
 
 def main():
-    # Загружаем данные пользователей при запуске
-    load_user_data()
 
-    # Создаем Application с увеличенными таймаутами
+    load_user_data()
+    load_subscriptions()
+
     application = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).connect_timeout(30).build()
 
-    # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stats", stats_command))
@@ -2607,7 +2606,19 @@ def main():
     application.add_handler(CommandHandler("clear_cache", clear_cache_command))
     application.add_handler(CommandHandler("queue", queue_command))
 
-    # Добавляем обработчик для поиска с ConversationHandler
+
+    application.add_handler(CommandHandler("subscribe", subscribe_command))
+    application.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
+    application.add_handler(CommandHandler("subscriptions", list_subscriptions_command))
+    application.add_handler(CommandHandler("notifications", toggle_notifications_command))
+
+
+    application.add_handler(CallbackQueryHandler(
+        handle_subscription_callback,
+        pattern="^(unsubscribe|unsubscribe_all|toggle_notif|manage_subs|toggle_menu|subscribe_dl):"
+    ))
+
+
     search_handler = ConversationHandler(
         entry_points=[CommandHandler('search', search_command)],
         states={
@@ -2618,7 +2629,7 @@ def main():
     )
     application.add_handler(search_handler)
 
-    # Добавляем обработчики сообщений
+
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_quality_selection, pattern="^(video|audio|best|max|tiktok):"))
     application.add_handler(CallbackQueryHandler(handle_cache_selection, pattern="^(cache|new_download):"))
@@ -2639,8 +2650,16 @@ def main():
 
     logger.info("Бот запущен...")
 
-    # Запускаем бота с обработкой KeyboardInterrupt
+	async def start_subscription_tasks(app):
+			for user_id in subscriptions.keys():
+				if user_id not in subscription_tasks:
+					subscription_tasks[user_id] = asyncio.create_task(
+						check_subscriptions_for_user(user_id, app)
+					)
+
     try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(start_subscription_tasks(application))
         application.run_polling(
             poll_interval=1.0,
             timeout=10,
@@ -2649,13 +2668,20 @@ def main():
         )
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
-        # Останавливаем пул потоков
+
+        for task in subscription_tasks.values():
+            task.cancel()
+
         download_executor.shutdown(wait=True)
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
         logger.error(traceback.format_exc())
-        # Останавливаем пул потоков
+
+        for task in subscription_tasks.values():
+            task.cancel()
         download_executor.shutdown(wait=True)
+
+
 
 if __name__ == "__main__":
     main()
