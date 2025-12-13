@@ -2650,12 +2650,12 @@ def main():
 
     logger.info("Бот запущен...")
 
-	async def start_subscription_tasks(app):
-			for user_id in subscriptions.keys():
-				if user_id not in subscription_tasks:
-					subscription_tasks[user_id] = asyncio.create_task(
-						check_subscriptions_for_user(user_id, app)
-					)
+    async def start_subscription_tasks(app):
+            for user_id in subscriptions.keys():
+                if user_id not in subscription_tasks:
+                    subscription_tasks[user_id] = asyncio.create_task(
+                        check_subscriptions_for_user(user_id, app)
+                    )
 
     try:
         loop = asyncio.get_event_loop()
