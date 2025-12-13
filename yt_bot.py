@@ -1285,8 +1285,6 @@ async def monitor_download_size(file_path, message, max_size=50*1024*1024):  # 5
 
     return True
 
-# Функция для обработки очереди загрузок
-# Функция для обработки очереди загрузок
 async def process_download_queue(app):
     """Обрабатывает очередь загрузок"""
     global queue_processing
@@ -1321,43 +1319,49 @@ async def process_download_queue(app):
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {send_error}")
                     return None
 
-            async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
-                """Безопасная отправка файла с учетом режима (инлайн или обычный)"""
-                try:
-                    with open(file_path, 'rb') as file:
-                        if is_inline_mode:
-                            # При инлайн-режиме отправляем в ЛС
-                            chat_id = user_id
-                        else:
-                            # При обычном режиме отправляем в тот же чат
-                            chat_id = message.chat_id if hasattr(message, 'chat_id') else user_id
 
-                        if is_audio:
-                            return await asyncio.wait_for(
-                                context.bot.send_audio(
-                                    chat_id=chat_id,
-                                    audio=file,
-                                    caption=f"🎵 {title}",
-                                    title=title[:30] + "..." if len(title) > 30 else title,
-                                    performer=source_text
-                                ),
-                                timeout=SEND_FILE_TIMEOUT
-                            )
-                        else:
-                            return await asyncio.wait_for(
-                                context.bot.send_video(
-                                    chat_id=chat_id,
-                                    video=file,
-                                    caption=f"🎥 {title}\n📺 Источник: {source_text}",
-                                    supports_streaming=True
-                                ),
-                                timeout=SEND_FILE_TIMEOUT
-                            )
-                except asyncio.TimeoutError:
-                    raise
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке файла: {e}")
-                    raise
+			async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
+				"""Безопасная отправка файла с учетом режима (инлайн или обычный)"""
+				try:
+					with open(file_path, 'rb') as file:
+						# Определяем куда отправлять
+						if is_inline_mode:
+							# При инлайн-режиме отправляем в ЛС
+							target_chat_id = user_id
+						else:
+							# При обычном режиме отправляем в тот же чат
+							# Важно: проверяем, существует ли message и имеет ли chat_id
+							if message and hasattr(message, 'chat_id'):
+								target_chat_id = message.chat_id
+							else:
+								target_chat_id = user_id
+
+						if is_audio:
+							return await asyncio.wait_for(
+								app.bot.send_audio(  # Используем app.bot вместо context.bot
+									chat_id=target_chat_id,
+									audio=file,
+									caption=f"🎵 {title}",
+									title=title[:30] + "..." if len(title) > 30 else title,
+									performer=source_text
+								),
+								timeout=SEND_FILE_TIMEOUT
+							)
+						else:
+							return await asyncio.wait_for(
+								app.bot.send_video(  # Используем app.bot вместо context.bot
+									chat_id=target_chat_id,
+									video=file,
+									caption=f"🎥 {title}\n📺 Источник: {source_text}",
+									supports_streaming=True
+								),
+								timeout=SEND_FILE_TIMEOUT
+							)
+				except asyncio.TimeoutError:
+					raise
+				except Exception as e:
+					logger.error(f"Ошибка при отправке файла: {e}")
+					raise
 
 
             # Уведомляем пользователя о начале обработки
