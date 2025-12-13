@@ -817,6 +817,89 @@ async def toggle_notifications_command(update: Update, context: ContextTypes.DEF
         logger.error(f"Ошибка в команде notifications: {e}")
         await update.message.reply_text("❌ Произошла ошибка. Попробуйте позже.")
 
+async def check_subscriptions_for_user(user_id, app):
+    """Проверяет новые видео для подписок пользователя"""
+    while True:
+        try:
+            if user_id not in subscriptions or not subscriptions[user_id]:
+                logger.info(f"Пользователь {user_id} не имеет подписок, останавливаем проверку")
+                if user_id in subscription_tasks:
+                    del subscription_tasks[user_id]
+                break
+
+            for sub_id, sub_data in list(subscriptions[user_id].items()):
+
+                if not sub_data.get('notifications_enabled', True):
+                    continue
+
+
+                current_time = time.time()
+                if current_time - sub_data['last_check'] < CHECK_INTERVAL:
+                    continue
+
+
+                subscriptions[user_id][sub_id]['last_check'] = current_time
+
+
+                try:
+                    latest_videos = get_latest_videos(sub_data['url'], 5)
+
+                    if latest_videos:
+
+                        last_known_video_id = sub_data.get('last_video_id')
+                        new_videos = []
+
+                        for video in latest_videos:
+                            if video['id'] == last_known_video_id:
+                                break
+                            new_videos.append(video)
+
+                        # Отправляем уведомления о новых видео
+                        if new_videos:
+                            for video in reversed(new_videos):  # От старых к новым
+                                message_text = (
+                                    f"🎬 Новое видео на канале {sub_data['title']}!\n\n"
+                                    f"📹 {video['title']}\n"
+                                    f"⏱ Длительность: {video['duration']} сек\n"
+                                    f"👁 Просмотров: {video.get('view_count', 'N/A')}\n\n"
+                                    f"🔗 Ссылка: {video['url']}"
+                                )
+
+                                keyboard = [
+                                    [InlineKeyboardButton("📥 Скачать видео", callback_data=f"subscribe_dl:{video['url']}:{user_id}")],
+                                    [InlineKeyboardButton("🔕 Отключить уведомления", callback_data=f"unsubscribe:{sub_id}:{user_id}")]
+                                ]
+
+                                try:
+                                    await app.bot.send_message(
+                                        chat_id=int(user_id),
+                                        text=message_text,
+                                        reply_markup=InlineKeyboardMarkup(keyboard),
+                                        disable_web_page_preview=True
+                                    )
+
+
+                                    await asyncio.sleep(1)
+
+                                except Exception as e:
+                                    logger.error(f"Ошибка при отправке уведомления: {e}")
+
+
+                            subscriptions[user_id][sub_id]['last_video_id'] = new_videos[0]['id']
+                            save_subscriptions()
+
+                except Exception as e:
+                    logger.error(f"Ошибка при проверке канала {sub_data['title']}: {e}")
+
+
+            save_subscriptions()
+
+            await asyncio.sleep(CHECK_INTERVAL)
+
+        except Exception as e:
+            logger.error(f"Ошибка в задаче проверки подписок для пользователя {user_id}: {e}")
+            await asyncio.sleep(300)
+
 async def download_video_async(url, format_type, format_id=None, url_type='youtube', message=None):
     """Асинхронная обертка для скачивания видео с прогрессом"""
     loop = asyncio.get_event_loop()
@@ -1116,43 +1199,43 @@ async def process_download_queue(app):
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {send_error}")
                     return None
 
-			async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
-				"""Безопасная отправка файла с учетом режима (инлайн или обычный)"""
-				try:
-					with open(file_path, 'rb') as file:
-						if is_inline_mode:
-							# При инлайн-режиме отправляем в ЛС
-							chat_id = user_id
-						else:
-							# При обычном режиме отправляем в тот же чат
-							chat_id = message.chat_id if hasattr(message, 'chat_id') else user_id
+            async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
+                """Безопасная отправка файла с учетом режима (инлайн или обычный)"""
+                try:
+                    with open(file_path, 'rb') as file:
+                        if is_inline_mode:
+                            # При инлайн-режиме отправляем в ЛС
+                            chat_id = user_id
+                        else:
+                            # При обычном режиме отправляем в тот же чат
+                            chat_id = message.chat_id if hasattr(message, 'chat_id') else user_id
 
-						if is_audio:
-							return await asyncio.wait_for(
-								context.bot.send_audio(
-									chat_id=chat_id,
-									audio=file,
-									caption=f"🎵 {title}",
-									title=title[:30] + "..." if len(title) > 30 else title,
-									performer=source_text
-								),
-								timeout=SEND_FILE_TIMEOUT
-							)
-						else:
-							return await asyncio.wait_for(
-								context.bot.send_video(
-									chat_id=chat_id,
-									video=file,
-									caption=f"🎥 {title}\n📺 Источник: {source_text}",
-									supports_streaming=True
-								),
-								timeout=SEND_FILE_TIMEOUT
-							)
-				except asyncio.TimeoutError:
-					raise
-				except Exception as e:
-					logger.error(f"Ошибка при отправке файла: {e}")
-					raise
+                        if is_audio:
+                            return await asyncio.wait_for(
+                                context.bot.send_audio(
+                                    chat_id=chat_id,
+                                    audio=file,
+                                    caption=f"🎵 {title}",
+                                    title=title[:30] + "..." if len(title) > 30 else title,
+                                    performer=source_text
+                                ),
+                                timeout=SEND_FILE_TIMEOUT
+                            )
+                        else:
+                            return await asyncio.wait_for(
+                                context.bot.send_video(
+                                    chat_id=chat_id,
+                                    video=file,
+                                    caption=f"🎥 {title}\n📺 Источник: {source_text}",
+                                    supports_streaming=True
+                                ),
+                                timeout=SEND_FILE_TIMEOUT
+                            )
+                except asyncio.TimeoutError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке файла: {e}")
+                    raise
 
 
             # Уведомляем пользователя о начале обработки
@@ -1201,10 +1284,10 @@ async def process_download_queue(app):
             else:
                 source_text = "YouTube"
 
-			await safe_edit_message("📤 Отправляю файл...")
+            await safe_edit_message("📤 Отправляю файл...")
 
-			try:
-				await safe_send_file(filename, title, is_audio, source_text, is_inline)
+            try:
+                await safe_send_file(filename, title, is_audio, source_text, is_inline)
             except asyncio.TimeoutError:
                 await safe_edit_message("❌ Таймаут при отправке файла. Пожалуйста, попробуйте позже.")
                 continue
