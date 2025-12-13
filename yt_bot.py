@@ -900,6 +900,128 @@ async def check_subscriptions_for_user(user_id, app):
             logger.error(f"Ошибка в задаче проверки подписок для пользователя {user_id}: {e}")
             await asyncio.sleep(300)
 
+async def handle_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик callback-кнопок для подписок"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data
+        parts = data.split(":")
+        action = parts[0]
+
+        if action == "unsubscribe":
+            if len(parts) < 3:
+                await query.edit_message_text("❌ Ошибка в данных запроса.")
+                return
+
+            sub_id = parts[1]
+            user_id = parts[2]
+
+            if user_id in subscriptions and sub_id in subscriptions[user_id]:
+                channel_title = subscriptions[user_id][sub_id]['title']
+                del subscriptions[user_id][sub_id]
+
+                if not subscriptions[user_id]:
+                    del subscriptions[user_id]
+
+                save_subscriptions()
+                await query.edit_message_text(f"✅ Вы отписались от канала: {channel_title}")
+            else:
+                await query.edit_message_text("❌ Подписка не найдена.")
+
+        elif action == "unsubscribe_all":
+            user_id = parts[1]
+            if user_id in subscriptions:
+                del subscriptions[user_id]
+                save_subscriptions()
+                await query.edit_message_text("✅ Вы отписались от всех каналов.")
+            else:
+                await query.edit_message_text("❌ У вас нет активных подписок.")
+
+        elif action == "toggle_notif":
+            if len(parts) < 3:
+                await query.edit_message_text("❌ Ошибка в данных запроса.")
+                return
+
+            sub_id = parts[1]
+            user_id = parts[2]
+
+            if user_id in subscriptions and sub_id in subscriptions[user_id]:
+                current_status = subscriptions[user_id][sub_id]['notifications_enabled']
+                subscriptions[user_id][sub_id]['notifications_enabled'] = not current_status
+                save_subscriptions()
+
+                status_text = "включены" if not current_status else "отключены"
+                await query.edit_message_text(f"✅ Уведомления для канала {subscriptions[user_id][sub_id]['title']} {status_text}.")
+            else:
+                await query.edit_message_text("❌ Подписка не найдена.")
+
+        elif action == "manage_subs":
+            user_id = parts[1]
+            # Показываем меню управления
+            keyboard = []
+            if user_id in subscriptions:
+                for sub_id, sub_data in subscriptions[user_id].items():
+                    keyboard.append([InlineKeyboardButton(
+                        f"❌ {sub_data['title']}",
+                        callback_data=f"unsubscribe:{sub_id}:{user_id}"
+                    )])
+
+            keyboard.append([InlineKeyboardButton("🔔 Управление уведомлениями", callback_data=f"toggle_menu:{user_id}")])
+            keyboard.append([InlineKeyboardButton("➕ Добавить подписку", switch_inline_query_current_chat="/subscribe ")])
+
+            await query.edit_message_text(
+                "⚙️ Управление подписками:\n\nВыберите действие:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        elif action == "toggle_menu":
+            user_id = parts[1]
+            # Меню включения/выключения уведомлений
+            keyboard = []
+            if user_id in subscriptions:
+                for sub_id, sub_data in subscriptions[user_id].items():
+                    status = "🔔" if sub_data['notifications_enabled'] else "🔕"
+                    keyboard.append([InlineKeyboardButton(
+                        f"{status} {sub_data['title']}",
+                        callback_data=f"toggle_notif:{sub_id}:{user_id}"
+                    )])
+
+            await query.edit_message_text(
+                "🔔 Выберите канал для изменения настроек уведомлений:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        elif action == "subscribe_dl":
+            # Скачать видео из уведомления
+            if len(parts) < 3:
+                await query.edit_message_text("❌ Ошибка в данных запроса.")
+                return
+
+            url = parts[1]
+            user_id = int(parts[2])
+
+            # Добавляем в очередь загрузки
+            url_type = get_url_type(url)
+            task = (user_id, url, "best", None, url_type, query.message, False)
+            await download_queue.put(task)
+
+            update_queue_positions()
+            position = queue_status.get(user_id, 0)
+
+            if position > 0:
+                await query.edit_message_text(f"📋 Запрос на скачивание добавлен в очередь. Позиция: {position}")
+            else:
+                await query.edit_message_text("📋 Запрос на скачивание добавлен в очередь.")
+
+            if not queue_processing:
+                asyncio.create_task(process_download_queue(context.application))
+
+    except Exception as e:
+        logger.error(f"Ошибка в обработке подписок callback: {e}")
+
+
 async def download_video_async(url, format_type, format_id=None, url_type='youtube', message=None):
     """Асинхронная обертка для скачивания видео с прогрессом"""
     loop = asyncio.get_event_loop()
