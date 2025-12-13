@@ -1898,6 +1898,7 @@ class DownloadProgress:
         self.max_size = max_size
         self.last_update = 0
         self.start_time = time.time()
+        self.loop = None
 
     def progress_hook(self, d):
         if d['status'] == 'downloading':
@@ -1933,12 +1934,17 @@ class DownloadProgress:
                     status_text = f"⏳ Загружено: {size_mb:.1f} МБ..."
 
                 try:
-                    # Используем asyncio для редактирования сообщения
-                    asyncio.create_task(self.update_message(status_text))
+                    # Используем asyncio для планирования задачи в основном потоке
+                    if self.loop:
+                        asyncio.run_coroutine_threadsafe(self.update_message(status_text), self.loop)
                 except:
                     pass
 
                 self.last_update = current_time
+
+    def set_loop(self, loop):
+        """Устанавливает цикл событий для асинхронных вызовов"""
+        self.loop = loop
 
     async def update_message(self, text):
         try:
@@ -2650,12 +2656,12 @@ def main():
 
     logger.info("Бот запущен...")
 
-    async def start_subscription_tasks(app):
-            for user_id in subscriptions.keys():
-                if user_id not in subscription_tasks:
-                    subscription_tasks[user_id] = asyncio.create_task(
-                        check_subscriptions_for_user(user_id, app)
-                    )
+	async def start_subscription_tasks(app):
+			for user_id in subscriptions.keys():
+				if user_id not in subscription_tasks:
+					subscription_tasks[user_id] = asyncio.create_task(
+						check_subscriptions_for_user(user_id, app)
+					)
 
     try:
         loop = asyncio.get_event_loop()
