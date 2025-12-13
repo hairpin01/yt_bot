@@ -1022,6 +1022,8 @@ async def handle_subscription_callback(update: Update, context: ContextTypes.DEF
         logger.error(f"Ошибка в обработке подписок callback: {e}")
 
 
+
+
 async def download_video_async(url, format_type, format_id=None, url_type='youtube', message=None):
     """Асинхронная обертка для скачивания видео с прогрессом"""
     loop = asyncio.get_event_loop()
@@ -1030,6 +1032,7 @@ async def download_video_async(url, format_type, format_id=None, url_type='youtu
     progress_hook = None
     if message:
         progress = DownloadProgress(message)
+        progress.set_loop(loop)
         progress_hook = progress.progress_hook
 
     try:
@@ -1049,10 +1052,10 @@ async def download_audio_async(url, url_type, message=None):
     """Асинхронная обертка для скачивания аудио с прогрессом"""
     loop = asyncio.get_event_loop()
 
-    # Создаем хук прогресса, если передан message
     progress_hook = None
     if message:
         progress = DownloadProgress(message)
+        progress.set_loop(loop)
         progress_hook = progress.progress_hook
 
     try:
@@ -1324,13 +1327,11 @@ async def process_download_queue(app):
 				"""Безопасная отправка файла с учетом режима (инлайн или обычный)"""
 				try:
 					with open(file_path, 'rb') as file:
-						# Определяем куда отправлять
+
 						if is_inline_mode:
-							# При инлайн-режиме отправляем в ЛС
+
 							target_chat_id = user_id
 						else:
-							# При обычном режиме отправляем в тот же чат
-							# Важно: проверяем, существует ли message и имеет ли chat_id
 							if message and hasattr(message, 'chat_id'):
 								target_chat_id = message.chat_id
 							else:
@@ -1338,7 +1339,7 @@ async def process_download_queue(app):
 
 						if is_audio:
 							return await asyncio.wait_for(
-								app.bot.send_audio(  # Используем app.bot вместо context.bot
+								app.bot.send_audio(
 									chat_id=target_chat_id,
 									audio=file,
 									caption=f"🎵 {title}",
@@ -1349,7 +1350,7 @@ async def process_download_queue(app):
 							)
 						else:
 							return await asyncio.wait_for(
-								app.bot.send_video(  # Используем app.bot вместо context.bot
+								app.bot.send_video(
 									chat_id=target_chat_id,
 									video=file,
 									caption=f"🎥 {title}\n📺 Источник: {source_text}",
