@@ -1323,46 +1323,46 @@ async def process_download_queue(app):
                     return None
 
 
-			async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
-				"""Безопасная отправка файла с учетом режима (инлайн или обычный)"""
-				try:
-					with open(file_path, 'rb') as file:
+            async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
+                """Безопасная отправка файла с учетом режима (инлайн или обычный)"""
+                try:
+                    with open(file_path, 'rb') as file:
 
-						if is_inline_mode:
+                        if is_inline_mode:
 
-							target_chat_id = user_id
-						else:
-							if message and hasattr(message, 'chat_id'):
-								target_chat_id = message.chat_id
-							else:
-								target_chat_id = user_id
+                            target_chat_id = user_id
+                        else:
+                            if message and hasattr(message, 'chat_id'):
+                                target_chat_id = message.chat_id
+                            else:
+                                target_chat_id = user_id
 
-						if is_audio:
-							return await asyncio.wait_for(
-								app.bot.send_audio(
-									chat_id=target_chat_id,
-									audio=file,
-									caption=f"🎵 {title}",
-									title=title[:30] + "..." if len(title) > 30 else title,
-									performer=source_text
-								),
-								timeout=SEND_FILE_TIMEOUT
-							)
-						else:
-							return await asyncio.wait_for(
-								app.bot.send_video(
-									chat_id=target_chat_id,
-									video=file,
-									caption=f"🎥 {title}\n📺 Источник: {source_text}",
-									supports_streaming=True
-								),
-								timeout=SEND_FILE_TIMEOUT
-							)
-				except asyncio.TimeoutError:
-					raise
-				except Exception as e:
-					logger.error(f"Ошибка при отправке файла: {e}")
-					raise
+                        if is_audio:
+                            return await asyncio.wait_for(
+                                app.bot.send_audio(
+                                    chat_id=target_chat_id,
+                                    audio=file,
+                                    caption=f"🎵 {title}",
+                                    title=title[:30] + "..." if len(title) > 30 else title,
+                                    performer=source_text
+                                ),
+                                timeout=SEND_FILE_TIMEOUT
+                            )
+                        else:
+                            return await asyncio.wait_for(
+                                app.bot.send_video(
+                                    chat_id=target_chat_id,
+                                    video=file,
+                                    caption=f"🎥 {title}\n📺 Источник: {source_text}",
+                                    supports_streaming=True
+                                ),
+                                timeout=SEND_FILE_TIMEOUT
+                            )
+                except asyncio.TimeoutError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке файла: {e}")
+                    raise
 
 
             # Уведомляем пользователя о начале обработки
@@ -2661,12 +2661,12 @@ def main():
 
     logger.info("Бот запущен...")
 
-	async def start_subscription_tasks(app):
-			for user_id in subscriptions.keys():
-				if user_id not in subscription_tasks:
-					subscription_tasks[user_id] = asyncio.create_task(
-						check_subscriptions_for_user(user_id, app)
-					)
+    async def start_subscription_tasks(app):
+            for user_id in subscriptions.keys():
+                if user_id not in subscription_tasks:
+                    subscription_tasks[user_id] = asyncio.create_task(
+                        check_subscriptions_for_user(user_id, app)
+                    )
 
     try:
         loop = asyncio.get_event_loop()
