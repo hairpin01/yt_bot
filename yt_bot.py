@@ -67,8 +67,10 @@ SUPPORTED_BROWSERS = ['chrome', 'firefox', 'edge', 'opera', 'vivaldi', 'safari']
 
 SEARCH_QUERY, SEARCH_RESULT = range(2)
 
-SEND_FILE_TIMEOUT = 300  # 5 минут
-EDIT_MESSAGE_TIMEOUT = 30  # 30 секунд
+MAX_SEARCH_LENGTH = 200
+MIN_SEARCH_INTERVAL = 5
+SEARCH_TIMEOUT = 30
+last_search_time = {}
 
 
 if not os.path.exists(CACHE_DIR):
