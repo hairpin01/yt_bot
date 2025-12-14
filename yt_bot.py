@@ -1323,46 +1323,46 @@ async def process_download_queue(app):
                     return None
 
 
-            async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
-                """Безопасная отправка файла с учетом режима (инлайн или обычный)"""
-                try:
-                    with open(file_path, 'rb') as file:
+			async def safe_send_file(file_path, title, is_audio, source_text, is_inline_mode=False):
+				"""Безопасная отправка файла с учетом режима (инлайн или обычный)"""
+				try:
+					with open(file_path, 'rb') as file:
 
-                        if is_inline_mode:
+						if is_inline_mode:
 
-                            target_chat_id = user_id
-                        else:
-                            if message and hasattr(message, 'chat_id'):
-                                target_chat_id = message.chat_id
-                            else:
-                                target_chat_id = user_id
+							target_chat_id = user_id
+						else:
+							if message and hasattr(message, 'chat_id'):
+								target_chat_id = message.chat_id
+							else:
+								target_chat_id = user_id
 
-                        if is_audio:
-                            return await asyncio.wait_for(
-                                app.bot.send_audio(
-                                    chat_id=target_chat_id,
-                                    audio=file,
-                                    caption=f"🎵 {title}",
-                                    title=title[:30] + "..." if len(title) > 30 else title,
-                                    performer=source_text
-                                ),
-                                timeout=SEND_FILE_TIMEOUT
-                            )
-                        else:
-                            return await asyncio.wait_for(
-                                app.bot.send_video(
-                                    chat_id=target_chat_id,
-                                    video=file,
-                                    caption=f"🎥 {title}\n📺 Источник: {source_text}",
-                                    supports_streaming=True
-                                ),
-                                timeout=SEND_FILE_TIMEOUT
-                            )
-                except asyncio.TimeoutError:
-                    raise
-                except Exception as e:
-                    logger.error(f"Ошибка при отправке файла: {e}")
-                    raise
+						if is_audio:
+							return await asyncio.wait_for(
+								app.bot.send_audio(
+									chat_id=target_chat_id,
+									audio=file,
+									caption=f"🎵 {title}",
+									title=title[:30] + "..." if len(title) > 30 else title,
+									performer=source_text
+								),
+								timeout=SEND_FILE_TIMEOUT
+							)
+						else:
+							return await asyncio.wait_for(
+								app.bot.send_video(
+									chat_id=target_chat_id,
+									video=file,
+									caption=f"🎥 {title}\n📺 Источник: {source_text}",
+									supports_streaming=True
+								),
+								timeout=SEND_FILE_TIMEOUT
+							)
+				except asyncio.TimeoutError:
+					raise
+				except Exception as e:
+					logger.error(f"Ошибка при отправке файла: {e}")
+					raise
 
 
             # Уведомляем пользователя о начале обработки
@@ -1699,44 +1699,72 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     return await execute_search(update, context, query)
 
-# Функция выполнения поиска
 async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query):
-    """Выполняет поиск на YouTube Music и показывает результаты"""
     user = update.effective_user
     user_id = user.id
 
-    # Безопасная отправка сообщения о начале поиска
+    if len(query) > MAX_SEARCH_LENGTH:
+        if update.effective_message:
+            await update.effective_message.reply_text(f"❌ Запрос слишком длинный. Максимально: {MAX_SEARCH_LENGTH} символов.")
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ Запрос слишком длинный. Максимально: {MAX_SEARCH_LENGTH} символов."
+            )
+        return ConversationHandler.END
+
+    current_time = time.time()
+    last_time = last_search_time.get(user_id, 0)
+
+    if current_time - last_time < MIN_SEARCH_INTERVAL:
+        wait_time = MIN_SEARCH_INTERVAL - int(current_time - last_time)
+        if update.effective_message:
+            await update.effective_message.reply_text(f"⏳ Подождите {wait_time} секунд перед следующим поиском.")
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"⏳ Подождите {wait_time} секунд перед следующим поиском."
+            )
+        return ConversationHandler.END
+
+    last_search_time[user_id] = current_time
+
     if update.effective_message:
-        search_msg = await update.effective_message.reply_text(f"🔍 Ищу \"{query}\" на YouTube Music...")
+        search_msg = await update.effective_message.reply_text(f"🔍 Ищу \"{query[:50]}\"...")
     else:
         search_msg = await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"🔍 Ищу \"{query}\" на YouTube Music..."
+            text=f"🔍 Ищу \"{query[:50]}\"..."
         )
 
     try:
-        # Выполняем поиск
-        results = search_youtube_music(query)
+        loop = asyncio.get_event_loop()
+
+        try:
+            results = await asyncio.wait_for(
+                loop.run_in_executor(download_executor, search_youtube_music, query),
+                timeout=SEARCH_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            await search_msg.edit_text("❌ Поиск занял слишком много времени. Попробуйте позже.")
+            return ConversationHandler.END
 
         if not results:
             await search_msg.edit_text("❌ По вашему запросу ничего не найдено.")
             return ConversationHandler.END
 
-        # Сохраняем результаты для пользователя
         user_searches[user_id] = {
             'query': query,
             'results': results,
             'timestamp': time.time()
         }
 
-        # Создаем клавиатуру с результатами
         keyboard = []
-        for i, result in enumerate(results[:5]):  # Ограничиваем до 5 результатов
+        for i, result in enumerate(results[:5]):
             title = result.get('title', 'Без названия')
             duration = result.get('duration', 0)
             uploader = result.get('uploader', 'Неизвестный исполнитель')
 
-            # Форматируем длительность
             if duration:
                 minutes = int(duration // 60)
                 seconds = int(duration % 60)
@@ -1744,9 +1772,8 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE, que
             else:
                 duration_str = "??:??"
 
-            # Создаем текст кнопки
             button_text = f"{i+1}. {uploader} | {title} ({duration_str})"
-            if len(button_text) > 60:  # Ограничиваем длину текста
+            if len(button_text) > 60:
                 button_text = button_text[:57] + "..."
 
             keyboard.append([InlineKeyboardButton(
@@ -1754,14 +1781,12 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE, que
                 callback_data=f"search_result:{i}:{user_id}"
             )])
 
-        # Добавляем кнопку отмены
         keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data=f"search_cancel:{user_id}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await search_msg.edit_text(
-            f"🎵 Найдено результатов по запросу \"{query}\":\n\n"
-            "Выберите трек для скачивания:",
+            f"🎵 Найдено результатов по запросу \"{query[:50]}\":\n\nВыберите трек:",
             reply_markup=reply_markup
         )
 
@@ -1769,20 +1794,22 @@ async def execute_search(update: Update, context: ContextTypes.DEFAULT_TYPE, que
 
     except Exception as e:
         logger.error(f"Ошибка при поиске: {e}")
-        logger.error(traceback.format_exc())
-        await search_msg.edit_text("❌ Произошла ошибка при поиске. Пожалуйста, попробуйте позже.")
+        await search_msg.edit_text("❌ Произошла ошибка при поиске.")
         return ConversationHandler.END
 
 async def handle_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик выбора результата из поиска"""
     try:
         query = update.callback_query
         await query.answer()
 
         data = query.data
         parts = data.split(":")
-        action = parts[0]
 
+        if len(parts) < 3:
+            await query.edit_message_text("❌ Ошибка в данных запроса.")
+            return ConversationHandler.END
+
+        action = parts[0]
 
         if action == "search_cancel":
             user_id = int(parts[1])
@@ -1790,85 +1817,72 @@ async def handle_search_result(update: Update, context: ContextTypes.DEFAULT_TYP
             if user_id in user_searches:
                 del user_searches[user_id]
             return ConversationHandler.END
-        elif action == "search_result":
-            if len(parts) < 3:
-                await query.edit_message_text("❌ Ошибка в данных запроса.")
+
+        result_index = int(parts[1])
+        user_id = int(parts[2])
+
+        if user_id not in user_searches:
+            await query.edit_message_text("❌ Результаты поиска устарели.")
+            return ConversationHandler.END
+
+        search_data = user_searches[user_id]
+        results = search_data.get('results', [])
+
+        if result_index >= len(results):
+            await query.edit_message_text("❌ Выбранный результат больше не доступен.")
+            return ConversationHandler.END
+
+        selected_result = results[result_index]
+        url = selected_result.get('url')
+        title = selected_result.get('title', 'Выбранный трек')
+
+        if not url:
+            await query.edit_message_text("❌ Не удалось получить ссылку на трек.")
+            return ConversationHandler.END
+
+        await query.edit_message_text(f"⏳ Получаю информацию о треке...")
+
+        try:
+            info = get_video_info(url, 'youtube')
+            formats = info.get('formats', [])
+
+            if not formats:
+                await query.edit_message_text("❌ Не удалось получить информацию о треке.")
                 return ConversationHandler.END
-            result_index = int(parts[1])
-            user_id = int(parts[2])
 
+            keyboard = create_quality_keyboard(formats, url, user_id, 'youtube')
+            duration = info.get('duration', 0)
 
-            if user_id not in user_searches:
-                await query.edit_message_text("❌ Результаты поиска устарели. Пожалуйста, выполните поиск снова.")
-                return ConversationHandler.END
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            hours, minutes = divmod(minutes, 60)
+            if hours > 0:
+                duration_str = f"{hours}:{minutes:02d}:{seconds:02d}"
+            else:
+                duration_str = f"{minutes}:{seconds:02d}"
 
-            search_data = user_searches[user_id]
-            results = search_data.get('results', [])
-
-            if result_index >= len(results):
-                await query.edit_message_text("❌ Выбранный результат больше не доступен.")
-                return ConversationHandler.END
-
-            selected_result = results[result_index]
-            url = selected_result.get('url')
-            title = selected_result.get('title', 'Выбранный трек')
-
-            if not url:
-                await query.edit_message_text("❌ Не удалось получить ссылку на выбранный трек.")
-                return ConversationHandler.END
-
+            await query.edit_message_text(
+                f"🎵 {title}\n⏱ Длительность: {duration_str}\n📺 Источник: YouTube\n\nВыберите качество:",
+                reply_markup=keyboard
+            )
 
             user_videos[user_id] = {
                 'url': url,
+                'formats': formats,
                 'url_type': 'youtube',
-                'title': title
+                'title': title,
+                'duration': duration
             }
 
-            await query.edit_message_text(f"⏳ Получаю информацию о треке \"{title}\"...")
+            return ConversationHandler.END
 
-            try:
-                info = get_video_info(url, 'youtube')
-                formats = info.get('formats', [])
-
-                if not formats:
-                    await query.edit_message_text("❌ Не удалось получить информации о треке.")
-                    return ConversationHandler.END
-
-
-                keyboard = create_quality_keyboard(formats, url, user_id, 'youtube')
-                duration = info.get('duration', 0)
-
-                minutes = int(duration // 60)
-                seconds = int(duration % 60)
-                hours, minutes = divmod(minutes, 60)
-                if hours > 0:
-                    duration_str = f"{hours}:{minutes:02d}:{seconds:02d}"
-                else:
-                    duration_str = f"{minutes}:{seconds:02d}"
-
-                await query.edit_message_text(
-                    f"🎵 {title}\n⏱ Длительность: {duration_str}\n📺 Источник: YouTube\n\nВыберите качество:",
-                    reply_markup=keyboard
-                )
-
-                # Сохраняем информацию о форматах
-                user_videos[user_id]['formats'] = formats
-                user_videos[user_id]['duration'] = duration
-
-                return ConversationHandler.END
-
-            except Exception as e:
-                logger.error(f"Ошибка при получении информации о треке: {e}")
-                logger.error(traceback.format_exc())
-                await query.edit_message_text("❌ Произошла ошибка при получении информации о треке. Пожалуйста, попробуйте позже.")
-                return ConversationHandler.END
-        else:
-            await query.edit_message_text("❌ Неизвестное действие.")
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о треке: {e}")
+            await query.edit_message_text("❌ Произошла ошибка.")
             return ConversationHandler.END
 
     except Exception as e:
         logger.error(f"Ошибка в обработке выбора поиска: {e}")
-        logger.error(traceback.format_exc())
         return ConversationHandler.END
 
 
@@ -2117,7 +2131,7 @@ async def handle_inline_callback(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Ошибка в обработке inline callback: {e}")
         logger.error(traceback.format_exc())
 
-# Inline query handler
+
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик inline-запросов"""
     try:
@@ -2214,11 +2228,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url_type = get_url_type(text)
 
         if url_type == 'unknown':
-            # В группах показываем более короткое сообщение об ошибке
+
             if chat.type in ['group', 'supergroup']:
                 await update.message.reply_text(
-                    "❌ Это не похоже на поддерживаемую ссылку. Поддерживаются YouTube, YouTube Music и TikTok.\n\n"
-                    "Отправьте прямую ссылку на видео."
+                    "❌ Это не похоже на поддерживаемую ссылку."
+
                 )
             else:
                 await update.message.reply_text(
@@ -2287,7 +2301,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     asyncio.create_task(process_download_queue(context.application))
                 return
 
-            # Для YouTube и YouTube Music показываем выбор качества
+
             keyboard = create_quality_keyboard(formats, text, user_id, url_type)
             title = info.get('title', 'YouTube видео')
             duration = info.get('duration', 0)
@@ -2307,7 +2321,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
 
-            # Сохраняем информацию о видео для пользователя
+
             user_videos[user_id] = {
                 'url': text,
                 'formats': formats,
@@ -2350,7 +2364,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в обработке сообщения: {e}")
         logger.error(traceback.format_exc())
 
-# Добавляем новый обработчик для выбора из кэша
+
 async def handle_cache_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -2441,7 +2455,7 @@ async def handle_cache_selection(update: Update, context: ContextTypes.DEFAULT_T
                 await query.edit_message_text("✅ Готово! Что-нибудь еще?")
 
         elif action == "new_download":
-            # Скачивание нового видео
+
             await query.edit_message_text("⏳ Получаю информацию о видео...")
 
             try:
@@ -2452,28 +2466,28 @@ async def handle_cache_selection(update: Update, context: ContextTypes.DEFAULT_T
                     await query.edit_message_text("❌ Не удалось получить информацию о видео.")
                     return
 
-                # Для TikTok добавляем в очередь
+
                 if url_type == 'tiktok':
-                    # Добавляем задание в очередь
+
                     task = (user_id, url, "best", None, url_type, query.message, is_inline)
                     await download_queue.put(task)
 
-                    # Обновляем позиции в очереди
+
                     update_queue_positions()
 
-                    # Сообщаем пользователю о позиции в очереди
+
                     position = queue_status.get(user_id, 0)
                     if position > 0:
                         await query.edit_message_text(f"📋 Ваш запрос добавлен в очередь. Позиция: {position}")
                     else:
                         await query.edit_message_text("📋 Ваш запрос добавлен в очередь.")
 
-                    # Запускаем обработку очереди, если она не активна
+
                     if not queue_processing:
                         asyncio.create_task(process_download_queue(context.application))
                     return
 
-                # Для YouTube и YouTube Music показываем выбор качества
+
                 keyboard = create_quality_keyboard(formats, url, user_id, url_type, is_inline)
                 title = info.get('title', 'YouTube видео')
                 duration = info.get('duration', 0)
@@ -2511,7 +2525,7 @@ async def handle_cache_selection(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Ошибка в обработке выбора кэша: {e}")
         logger.error(traceback.format_exc())
 
-# Модифицируем функцию handle_quality_selection для добавления в очередь
+
 async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -2661,12 +2675,12 @@ def main():
 
     logger.info("Бот запущен...")
 
-    async def start_subscription_tasks(app):
-            for user_id in subscriptions.keys():
-                if user_id not in subscription_tasks:
-                    subscription_tasks[user_id] = asyncio.create_task(
-                        check_subscriptions_for_user(user_id, app)
-                    )
+	async def start_subscription_tasks(app):
+			for user_id in subscriptions.keys():
+				if user_id not in subscription_tasks:
+					subscription_tasks[user_id] = asyncio.create_task(
+						check_subscriptions_for_user(user_id, app)
+					)
 
     try:
         loop = asyncio.get_event_loop()
