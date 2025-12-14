@@ -32,8 +32,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "7868316415:AAEAizJcIjORaTEJZLYkawWglXcHamEXvns"
-ADMIN_ID = "6020965582"  # Ваш ID в Telegram
+BOT_TOKEN = "BOT_TOKEN"
+ADMIN_ID = "12345678"  # Ваш ID в Telegram
 
 # Глобальные словари
 inline_query_cache = {}
@@ -58,7 +58,7 @@ COOKIES_FILES = [
 ]
 
 SUBSCRIPTIONS_FILE = "subscriptions.json"
-CHECK_INTERVAL = 3600  # 1 час
+CHECK_INTERVAL = 3600
 subscriptions = {}
 subscription_tasks = {}
 
