@@ -1171,21 +1171,18 @@ def download_audio(url, url_type):
         logger.error(f"Ошибка при скачивании аудио: {e}")
         raise e
 
-# Функция поиска на YouTube Music
+
 def search_youtube_music(query, max_results=5):
-    """Выполняет поиск на YouTube Music и возвращает результаты"""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
         'skip_download': True,
-        # Добавляем параметры для работы с SSL
         'no_check_certificate': True,
         'socket_timeout': 30,
         'source_address': '0.0.0.0',
     }
 
-    # Добавляем cookies для YouTube, если доступны
     for cookies_file in COOKIES_FILES:
         if os.path.exists(cookies_file):
             ydl_opts['cookiefile'] = cookies_file
@@ -1193,7 +1190,6 @@ def search_youtube_music(query, max_results=5):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Используем обычный поиск YouTube с фильтрацией
             info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
 
             if not info or 'entries' not in info:
@@ -1202,7 +1198,6 @@ def search_youtube_music(query, max_results=5):
             return info['entries']
     except Exception as e:
         logger.error(f"Ошибка при поиске на YouTube Music: {e}")
-        logger.error(traceback.format_exc())
         return None
 
 # Функция добавления пользователя
